@@ -1,0 +1,632 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+# Stimulate classificationData
+```{r}
+#p = 2000, n = 1000
+p  =2000
+n = 8000
+
+# Stimulate Classification Data
+
+
+x_clf <- matrix(rep(NA,n*p),n,p)
+y_clf <- rep(NA,n)
+set.seed(6520) 
+beta = c(rnorm(200,0,5),rep(0,1800))
+
+set.seed(1)
+for (i in 1:n){
+  x_clf[i,] = rnorm(p, 0,1)
+}
+
+
+z = x_clf%*%beta      # linear combination with a bias
+pr = 1/(1+exp(-z))         # pass through an inv-logit function
+set.seed(6520)
+y_clf = rbinom(n,1,pr)
+
+x_clf_s=x_clf[1:1000,]
+y_clf_s=y_clf[1:1000]
+```
+
+
+
+## Stochastic Gradient Descent on Classification
+```{r}
+SGD_clf <- function(X,Y,learning){
+  
+  p=ncol(X)
+  n=nrow(X)
+  
+  #randomly shuffle data
+  set.seed(2)
+  shuffle = sample(n)
+  X = X[shuffle,]
+  Y = Y[shuffle]
+  #set initial bate = 0
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  beta_j = rep(NA,p)
+  beta_stochasticGD =matrix(NA,n,p)
+
+  #iterate
+  for(i in 1:n){
+      z = X[i,] %*%beta_init
+      hx = 1/(1+exp(-z))
+    
+      for (j in 1:p){
+      beta_j[j] = beta_init[j] - learning*(hx - Y[i]) * X[i,j]/n
+    }
+    beta_stochasticGD[i,] = beta_j
+    beta_init <- beta_j
+    beta_j <- rep(NA,p)
+}
+  #save final result
+  return(beta_stochasticGD) 
+}
+```
+
+## Adaptive Gradient Descents on Classification
+```{R}
+AdaGrad_clf<- function(X,Y,learning){
+  #set initial bate = 0\
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  G=matrix(0,p,p)
+  
+  
+  #iterate
+  beta_res=matrix(NA,n,p)
+  
+  for (i in 1:n){
+    z = X[i,]%*%beta_init 
+    hx = 1/(1+exp(-z)) 
+    gt=as.numeric(hx-Y[i])*X[i,]
+    G=G+gt%*%t(gt)
+    
+    beta_update <- beta_init -learning*diag(diag(G)^(-1/2))%*%gt
+    beta_init <- beta_update
+    beta_res[i,]=beta_init
+
+  }
+
+  #save final result
+  return(beta_res) 
+}
+```
+
+
+# Online Mirror Descent on Classification
+
+```{r}
+OMD_clf <- function(X,Y,learning){
+  
+  
+  d=ncol(X)
+  n=nrow(X)
+  p = 1+1/log(d)
+
+  q = p/(p-1)
+  
+  # randomly shuffle data
+  #set.seed(2)
+  #shuffle = sample(n)
+  #X = X[shuffle,]
+  #Y = Y[shuffle]
+  #set initial bate = 0
+
+  beta_init <- as.matrix(rnorm(d,0,1))
+  beta_OMD =matrix(NA,n,d)
+
+  #iterate
+  for(i in 1:n){
+    
+    wt = sum(abs(beta_init)^p)^(1/p) * hadamard.prod(beta_init, abs(beta_init)^(p-2))/(sum(abs(beta_init)^p)^(1/p))^(p-1)
+    
+    ft = X[i,]%*%beta_init 
+    hx = 1/(1+exp(-ft)) 
+
+    gt = learning * as.numeric(( hx - Y[i])) * X[i,]
+    zt = wt-gt
+    beta_update <- sign(zt) * (abs(zt)^(q-1)) / sum(abs(zt) ^ q) ^((q-2)/q)
+    beta_OMD[i,] = beta_update
+    beta_init <- beta_update
+
+}
+  #save final result
+  return(beta_OMD) 
+}
+```
+
+## COMID on Classification
+```{r}
+S <- function(x,learning,lambda)
+{
+  d=abs(x)-learning*lambda
+  d[d<0] <- 0
+  res=sign(x)*d
+  return(res)
+}
+
+Phit <- function(x,q){
+  
+  c=(sum((abs(x))^q))^{(q-2)/q}
+  phit=(1/c)*(sign(x)*abs(x)^{q-1})
+return(phit)
+  
+}
+COMID_clf <- function(X,Y,learning,q,lambda){
+  #set initial bate = 0
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  theta_init <- rep(0,p)
+  beta_COMID =matrix(NA,n,p)
+  if (q==1){q=q+1/log(p)}
+  
+  
+  #iterate
+  for(i in 1:n){
+  
+    z = X[i,]%*%beta_init 
+    hx = 1/(1+exp(-z)) 
+    gt=as.numeric(hx-Y[i])*X[i,]
+  
+    theta_update=theta_init-learning*gt
+    c=S(theta_update,learning,lambda)
+    
+    p=q/{q-1}
+    beta_update=Phit(c,p)
+    beta_COMID[i,]=beta_update
+    beta_init <- beta_update
+    theta_init = theta_update
+  }
+  
+  #save final result
+  return(beta_COMID) 
+}
+```
+
+```{r}
+OGD_beta_s_clf=COMID_clf(x_clf_s,y_clf_s,0.1,q=2,lambda=0)
+AdaGrad_beta_s_clf=AdaGrad_clf(x_clf_s,y_clf_s,0.8)
+OMD_beta_s_clf=COMID_clf(x_clf_s,y_clf_s,5,q=1,lambda=0)
+COMID_beta_s_clf=COMID_clf(x_clf_s,y_clf_s,10,q=1,lambda=0.01)
+```
+
+```{r}
+coefficients=seq(1,p,1)
+par(mfrow=c(2,2))
+
+#OGD_beta_s_clf=COMID_clf(x_clf_s,y_clf_s,0.1,q=2,lambda=0)
+plot(coefficients,beta,"h",col="grey",main = "OGD")
+lines(coefficients,OGD_beta_s_clf[1000,],"h",col="blue")
+
+
+plot(coefficients,beta,"h",col="grey",main = "AdaGrad")
+lines(coefficients,AdaGrad_beta_s_clf[1000,],"h",col="blue")
+
+plot(coefficients,beta,"h",col="grey",main = "OMD")
+lines(coefficients,OMD_beta_s_clf[1000,],"h",col="blue")
+
+plot(coefficients,beta,"h",col="grey",main = "COMID")
+lines(coefficients,COMID_beta_s_clf[1000,],"h",col="blue")
+```
+
+
+```{r}
+OGD_clf_beta=COMID_clf(x_clf,y_clf,1,q=2,lambda=0)
+AdaGrad_clf_beta=AdaGrad_clf(x_clf,y_clf,1)
+OMD_clf_beta=COMID_clf(x_clf,y_clf,5,q=1,lambda=0)
+COMID_clf_beta=COMID_clf(x_clf,y_clf,10,q=1,lambda=0.01)
+
+
+n=8000
+MSPE_OGD_clf=rep(NA,n)
+MSPE_AdaGrad_clf=rep(NA,n)
+MSPE_OMD_clf=rep(NA,n)
+MSPE_COMID_clf=rep(NA,n)
+
+
+
+
+for (i in 1:n){
+z_pred = x_clf %*% AdaGrad_clf_beta[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_AdaGrad_clf[i]=mean((y_clf-y_pred)^2)
+}
+
+
+for (i in 1:n){
+z_pred = x_clf %*% OGD_clf_beta[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OGD_clf[i]=mean((y_clf-y_pred)^2)
+}
+
+
+
+for (i in 1:n){
+z_pred = x_clf %*% OMD_clf_beta[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_clf[i]=mean((y_clf-y_pred)^2)
+}
+
+ 
+for (i in 1:n){
+z_pred = x_clf %*% COMID_clf_beta[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_COMID_clf[i]=mean((y_clf-y_pred)^2)
+}
+
+  
+plot(seq(1,n,1),MSPE_OMD_clf,type = "l",col="green",xlab="n",ylab="Prediction Error",ylim=c(0.0,0.5))
+lines(seq(1,n,1),MSPE_AdaGrad_clf,type = "l",col="red")
+lines(seq(1,n,1),MSPE_OMD_clf,type = "l",col="green")
+lines(seq(1,n,1),MSPE_COMID_clf,type = "l",col="orange")
+lines(seq(1,n,1),MSPE_OGD_clf,type = "l",col="blue")
+legend("topright", legend=c("AdaGrad", "OMD","OGD","COMID"),
+       col=c("red", "green","blue","orange"), lty=rep(1,4),cex=0.8)
+abline(v=1000,lty=2)
+```
+
+
+##convergence rate
+```{r}
+
+#500,1000,2000,5000
+p_rate =5000
+n_rate =1000
+
+# Stimulate Classification Data
+
+
+x_rate_5000  <- matrix(rep(NA,n_rate*p_rate),n_rate,p_rate)
+
+y_rate  <- rep(NA,n)
+set.seed(6520) 
+beta_rate = c(rnorm(200,0,5),rep(0,4800))
+
+set.seed(1)
+for (i in 1:n_rate){
+  x_rate_5000[i,] = runif(p_rate, -3,3)
+}
+
+
+x_rate_2000=x_rate_5000[,1:2000]
+x_rate_1000=x_rate_5000[,1:1000]
+x_rate_500=x_rate_5000[,1:500]
+
+        # pass through an inv-logit function
+set.seed(6520)
+pr = 1/(1+exp(-x_rate_5000%*%beta_rate[1:5000]))   
+y_rate_5000 = rbinom(n_rate,1,pr)
+
+set.seed(6520)
+pr = 1/(1+exp(-x_rate_2000%*%beta_rate[1:2000]))   
+y_rate_2000 = rbinom(n_rate,1,pr)
+
+set.seed(6520)
+pr = 1/(1+exp(-x_rate_1000%*%beta_rate[1:1000]))   
+y_rate_1000 = rbinom(n_rate,1,pr)
+
+set.seed(6520)
+pr = 1/(1+exp(-x_rate_500%*%beta_rate[1:500]))   
+y_rate_500 = rbinom(n_rate,1,pr)
+
+```
+
+
+
+```{r}
+OMD_clf_beta_5000=PRA_OGD_clf(x_rate_5000,y_rate_5000,10,q=1,lambda=0)
+OMD_clf_beta_2000=PRA_OGD_clf(x_rate_2000,y_rate_2000,10,q=1,lambda=0)
+OMD_clf_beta_1000=PRA_OGD_clf(x_rate_1000,y_rate_1000,10,q=1,lambda=0)
+OMD_clf_beta_500=PRA_OGD_clf(x_rate_500,y_rate_500,10,q=1,lambda=0)
+
+
+n=1000
+MSPE_OMD_5000=rep(NA,n)
+MSPE_OMD_2000=rep(NA,n)
+MSPE_OMD_1000=rep(NA,n)
+MSPE_OMD_500=rep(NA,n)
+
+
+for (i in 1:n){
+  
+z_pred = x_rate_5000 %*% OMD_clf_beta_5000[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_5000[i]=mean((y_rate_5000-y_pred)^2)
+}
+
+for (i in 1:n){
+z_pred = x_rate_2000 %*% OMD_clf_beta_2000[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_2000[i]=mean((y_rate_2000-y_pred)^2)
+}
+
+for (i in 1:n){
+z_pred = x_rate_1000 %*% OMD_clf_beta_1000[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_1000[i]=mean((y_rate_1000-y_pred)^2)
+}
+
+for (i in 1:n){
+z_pred = x_rate_500 %*% OMD_clf_beta_500[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_500[i]=mean((y_rate_500-y_pred)^2)
+}
+
+
+t1=sqrt(log(500)/seq(1,n_rate,1))
+t2=sqrt(log(1000)/seq(1,n_rate,1))
+t3=sqrt(log(2000)/seq(1,n_rate,1))
+t4=sqrt(log(5000)/seq(1,n_rate,1))
+
+
+plot(seq(1,n_rate,1),MSPE_OMD_500,type = "l",col="red",xlab="T",ylab="Prediction Error",main = "Convergence Rate",ylim = c(0.09,0.55))
+lines(seq(1,n_rate,1),MSPE_OMD_1000,type = "l",col="green")
+lines(seq(1,n_rate,1),MSPE_OMD_2000,type = "l",col="orange")
+lines(seq(1,n_rate,1),MSPE_OMD_5000,type = "l",col="blue")
+lines(seq(1,n_rate,1),t4,type = "l",col="blue")
+lines(seq(1,n_rate,1),t1,type = "l",col="red")
+lines(seq(1,n_rate,1),t2,type = "l",col="green")
+lines(seq(1,n_rate,1),t3,type = "l",col="orange")
+
+
+
+legend("topright",legend=c("500", "1000","2000","5000"),
+       col=c("red", "green","orange","blue"), lty=rep(1,4), cex=0.8)
+#abline(v=1000,lty=2)
+
+
+plot(seq(1,n_rate,1)/log(500),MSPE_OMD_500,type = "l",col="red",xlab="T/logd",ylab="Prediction Error",main = "Convergence Rate")
+lines(seq(1,n_rate,1)/log(1000),MSPE_OMD_1000,type = "l",col="green")
+lines(seq(1,n_rate,1)/log(2000),MSPE_OMD_2000,type = "l",col="orange")
+lines(seq(1,n_rate,1)/log(5000),MSPE_OMD_5000,type = "l",col="blue")
+legend("topright",legend=c("500", "1000","2000","5000"),
+       col=c("red", "green","orange","blue"), lty=rep(1,4), cex=0.8)
+#abline(v=1000,lty=2)
+```
+
+
+
+
+##Averaging
+```{r}
+PRA_OGD_clf <- function(X,Y,learning,q,lambda){
+  #set initial bate = 0
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  theta_init <- rep(0,p)
+  beta_COMID =matrix(NA,n,p)
+  if (q==1){q=q+1/log(p)}
+  beta_sum = beta_init
+  
+  #iterate
+  for(i in 1:n){
+  
+    z = X[i,]%*%beta_init 
+    hx = 1/(1+exp(-z)) 
+    gt=as.numeric(hx-Y[i])*X[i,]
+  
+    theta_update=theta_init-learning*gt
+    c=S(theta_update,learning,lambda)
+    
+    p=q/{q-1}
+    beta_update=Phit(c,p)
+   
+    beta_init <- beta_update
+    theta_init = theta_update
+    
+    beta_sum = beta_sum + beta_update
+    beta_avg = beta_sum/i
+    beta_COMID[i,]=beta_avg 
+
+    
+  }
+  
+  
+  
+  #save final result
+  return(beta_COMID) 
+}
+```
+
+
+
+
+```{r}
+PRA_OGD_clf_beta=PRA_OGD_clf(x_clf,y_clf,5,q=2,lambda=0)
+
+MSPE_PRA_OGD_clf=rep(NA,n)
+for (i in 1:n){
+z_pred = x_clf %*% PRA_OGD_clf_beta[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_PRA_OGD_clf[i]=mean((y_clf-y_pred)^2)
+}
+
+
+plot(seq(1,n,1),MSPE_PRA_OGD_clf,type = "l",col="red",xlab="n",ylab="Prediction Error")
+lines(seq(1,n,1),MSPE_OGD_clf,type = "l",col="blue")
+legend("topright", legend=c("Averaging","OGD"),lty=rep(1,2),
+       col=c("red", "blue"),cex=0.8)
+
+
+
+```
+
+
+##Tuning
+```{r}
+n_valid=1000
+p_valid=2000
+x_valid <- matrix(rep(NA,n_valid*p),n_valid,p_valid)
+
+set.seed(6520)
+for (i in 1:n_valid){
+  x_valid[i,] = rnorm(p_valid, 0,1)
+}
+
+
+z = x_valid%*%beta      # linear combination with a bias
+pr = 1/(1+exp(-z))         # pass through an inv-logit function
+set.seed(6520)
+y_valid = rbinom(n_valid,1,pr)
+  
+
+  
+
+
+Tuning=seq(from = 1e-2, to = 1.5,length.out = 50)
+COMID_error=rep(NA,50)
+for (j in 1:50){
+  t=Tuning[j]
+  COMID_beta_tuning=COMID_clf(x_valid,y_valid,10,q=1,lambda=t)
+  z_pred = x_valid %*% COMID_beta_tuning[n_valid,]
+  pr_pred = 1/(1+exp(-z_pred)) 
+  y_pred = rep(NA,n_valid)
+  y_pred[pr_pred >= 0.5] = 1
+  y_pred[pr_pred< 0.5] = 0
+  COMID_error[j]=mean((y_valid-y_pred)^2)
+}
+plot(Tuning,COMID_error,xlab = "Tuning Parameter",ylab="Test Error",type = "l")
+
+
+
+
+COMID_beta_tuning=COMID_clf(x_valid,y_valid,10,q=1,lambda=0.01)
+  z_pred = x_valid %*% COMID_beta_tuning[n_valid,]
+  pr_pred = 1/(1+exp(-z_pred)) 
+  y_pred = rep(NA,n_valid)
+  y_pred[pr_pred >= 0.5] = 1
+  y_pred[pr_pred< 0.5] = 0
+  mean((y_valid-y_pred)^2)
+
+```
+
+
+##estimate error
+```{r}
+n=8000
+est_OGD_clf=rep(NA,n)
+est_AdaGrad_clf=rep(NA,n)
+est_OMD_clf=rep(NA,n)
+est_COMID_clf=rep(NA,n)
+
+
+
+
+for (i in 1:n){
+  est_OGD_clf[i]=norm(beta-OGD_clf_beta[i,],"2")
+  est_AdaGrad_clf[i]=norm(beta-AdaGrad_clf_beta[i,],"2")
+  est_OMD_clf[i]=norm(beta-OMD_clf_beta[i,],"2")
+  est_COMID_clf[i]=norm(beta-COMID_clf_beta[i,],"2")
+ 
+}
+
+plot(seq(1,n,1),est_AdaGrad_clf,type = "l",col="red",xlab="n",ylab="Estimation Error",ylim = c(50,1440))
+lines(seq(1,n,1),est_OMD_clf,type = "l",col="green")
+#lines(seq(1,n,1),MSPE_SGD,type = "l",col="black")
+lines(seq(1,n,1),est_OGD_clf,type = "l",col="blue")
+lines(seq(1,n,1),est_COMID_clf,type = "l",col="orange")
+legend("topright",legend=c("AdaGrad", "OMD","OGD","COMID"),
+       col=c("red", "green","blue","orange"), lty=rep(1,4), cex=0.8)
+abline(v=1000,lty=2)
+```
+
+
+
+
+##Tuning
+```{r}
+OMD_clf_beta_t0.05=COMID_clf(x_clf,y_clf,10,q=1,lambda=0.05)
+OMD_clf_beta_t0.5=COMID_clf(x_clf,y_clf,10,q=1,lambda=0.5)
+OMD_clf_beta_t1=COMID_clf(x_clf,y_clf,10,q=1,lambda=1)
+
+
+n=8000
+MSPE_OMD_t0.05=rep(NA,n)
+MSPE_OMD_t0.5=rep(NA,n)
+MSPE_OMD_t1=rep(NA,n)
+
+
+
+
+for (i in 1:n){
+  
+z_pred = x_clf %*% OMD_clf_beta_t0.05[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_t0.05[i]=mean((y_clf-y_pred)^2)
+}
+
+for (i in 1:n){
+  
+z_pred = x_clf %*% OMD_clf_beta_t0.5[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_t0.5[i]=mean((y_clf-y_pred)^2)
+}
+
+for (i in 1:n){
+  
+z_pred = x_clf %*% OMD_clf_beta_t1[i,]
+pr_pred = 1/(1+exp(-z_pred)) 
+y_pred = rep(NA,n_rate)
+y_pred[pr_pred >= 0.5] = 1
+y_pred[pr_pred< 0.5] = 0
+MSPE_OMD_t1[i]=mean((y_clf-y_pred)^2)
+}
+
+
+
+
+
+plot(seq(1,n,1),MSPE_OMD_t0.05,type = "l",col="red",xlab="n",ylab="Prediction Error",main = "Tuning parameter",ylim = c(0.10,0.55))
+#lines(seq(1,n,1),MSPE_OGD,type = "l",col="green")
+lines(seq(1,n,1),MSPE_OMD_t0.5,type = "l",col="orange")
+lines(seq(1,n,1),MSPE_OMD_t1,type = "l",col="blue")
+legend("topright",legend=c("0.05","0.5","1"),
+       col=c("red", "green","orange","blue"), lty=rep(1,4), cex=0.8)
+#abline(v=1000,lty=2)
+
+
+```

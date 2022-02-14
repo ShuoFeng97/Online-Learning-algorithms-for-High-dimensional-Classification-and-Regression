@@ -1,0 +1,412 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+# Stimulate Regression Data
+```{r}
+#p = 2000, n = 1000
+p  =2000
+n = 8000
+x_reg <- matrix(rep(NA,n*p),n,p)
+y_reg <- rep(NA,n)
+
+set.seed(6520)  
+# create X
+for (i in 1:n){
+  x_reg[i,] = rnorm(p, 0,1)
+}
+# create noise
+set.seed(6520) 
+epsil <- rnorm(n,0,1)
+ 
+#create beta , first 200 entry follow rnorm(), mean = 0, sd = 10
+set.seed(6520) 
+beta = c(rnorm(200,0,5),rep(0,1800))
+
+#create Y
+y_reg <<- x_reg%*%beta + epsil
+
+
+x_reg_s=x_reg[1:1000,]
+y_reg_s=y_reg[1:1000]
+```
+
+
+# Recursive Least Squares
+## Recursive Least Squares for regression
+```{r}
+recursive_LS <- function(X,Y){
+  #initialize
+  n <- nrow(X)
+  p <- ncol(X)
+  
+  #initial
+  #S <- t(X[1,])%*%X[1,]
+  S = matrix(1000,1,1)
+  beta_init <- solve(S,0*t(X[1,]))
+  
+  
+  #iterate
+  for(i in 1:n){
+    S <- S - t(X[i,])%*%X[i,]
+    beta_update <- beta_init + 
+      as.numeric(1/(X[i,]%*%t(solve(S,t(X[i,])))))*solve(S,t(X[i,]))*as.numeric(Y[i]-X[i,]%*%t(beta_init))
+    beta_init <- beta_update
+    
+    
+  }
+  
+  #save final result
+  beta_recursiveLS <<- beta_init
+}
+```
+
+
+## Stochastic Gradient Descent on Regression
+```{r}
+SGD_reg <- function(X,Y,learning){
+  
+  p=ncol(X)
+  n=nrow(X)
+  
+  #randomly shuffle data
+  set.seed(2)
+  shuffle = sample(n)
+  X = X[shuffle,]
+  Y = Y[shuffle,]
+  #set initial bate = 0
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  beta_j = rep(NA,p)
+  beta_stochasticGD =matrix(NA,n,p)
+  
+  #iterate
+  for(i in 1:n){
+    for (j in 1:p){
+      beta_j[j] = beta_init[j] - learning*(X[i,] %*%beta_init - Y[i]) * X[i,j]/n
+    }
+    beta_stochasticGD[i,] = beta_j
+    beta_init <- beta_j
+    beta_j <- rep(NA,p)
+}
+  #save final result
+  return(beta_stochasticGD) 
+}
+```
+
+# Adaptive Gradient Descent
+## Adaptive Gradient Descent on Regression
+```{r}
+AdaGrad_reg <- function(X,Y,learning){
+  #set initial bate = 0\
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  G=matrix(0,p,p)
+  
+   # randomly shuffle data
+  #set.seed(2)
+  #shuffle = sample(n)
+  #X = X[shuffle,]
+  #Y = Y[shuffle]
+
+
+  #iterate
+  
+  beta_res=matrix(NA,n,p)
+  
+  for (i in 1:n){
+    gt=-2*as.numeric((Y[i]-X[i,]%*%beta_init))*X[i,]
+    G=G+gt%*%t(gt)
+    beta_update <- beta_init - learning*diag(diag(G)^(-1/2))%*%gt
+    
+    beta_init <- beta_update
+    beta_res[i,]=beta_init
+  }
+  
+
+  #save final result
+  return(beta_res) 
+}
+```
+
+# Online Mirror Descent on Regression
+```{r}
+library(matrixcalc)
+OMD_reg <- function(X,Y,learning){
+  
+  
+  d=ncol(X)
+  n=nrow(X)
+  p = 1+1/log(d)
+
+  q = p/(p-1)
+  
+  # randomly shuffle data
+  #set.seed(2)
+  #shuffle = sample(n)
+  #X = X[shuffle,]
+  #Y = Y[shuffle]
+  #set initial bate = 0
+
+  beta_init <- as.matrix(rnorm(d,0,1))
+  beta_OMD =matrix(NA,n,d)
+
+  #iterate
+  for(i in 1:n){
+    
+    wt = sum(abs(beta_init)^p)^(1/p) * hadamard.prod(beta_init, abs(beta_init)^(p-2))/(sum(abs(beta_init)^p)^(1/p))^(p-1)
+    
+    gt = learning * as.numeric((X[i,] %*% beta_init - Y[i])) * X[i,]
+    zt = wt-gt
+    beta_update <- sign(zt) * (abs(zt)^(q-1)) / sum(abs(zt) ^ q) ^((q-2)/q)
+    beta_OMD[i,] = beta_update
+    beta_init <- beta_update
+
+}
+  #save final result
+  return(beta_OMD) 
+}
+```
+
+
+
+
+# Composite Objective Mirror Descent
+## COMID on Regression
+```{r}
+S <- function(x,learning,lambda)
+{
+  d=abs(x)-learning*lambda
+  d[d<0] <- 0
+  res=sign(x)*d
+  return(res)
+}
+
+Phit <- function(x,q){
+  
+  c=(sum((abs(x))^q))^{(q-2)/q}
+  phit=(1/c)*(sign(x)*abs(x)^{q-1})
+return(phit)
+  
+}
+COMID_reg <- function(X,Y,learning,q,lambda){
+  #set initial bate = 0
+  p=ncol(X)
+  n=nrow(X)
+  beta_init <- rep(0,p)
+  theta_init <- rep(0,p)
+  beta_COMID =matrix(NA,n,p)
+  if (q==1){q=q+1/log(p)}
+  gt=0
+  
+  #set.seed(2)
+  #shuffle = sample(n)
+  #X = X[shuffle,]
+  #Y = Y[shuffle]
+  
+  #iterate
+  for(i in 1:n){
+    #ft=(Y[i]-X[i,]%*%beta_init)^2
+
+    #gt=-as.numeric((Y[i]-X[i,]%*%beta_init))*X[i,]/(2*n)
+    gt= as.numeric((X[i,] %*% beta_init - Y[i])) * X[i,]/n
+    #gt=-2*(t(X[1:i,])%*%(Y[1:i]-X[1:i,]%*%beta_init))
+    #c=S(Phit(beta_init,q)-learning*gt,learning,lambda)
+    theta_update=theta_init-learning*gt
+    c=S(theta_update,learning,lambda)
+    
+    p=q/{q-1}
+    beta_update=Phit(c,p)
+    beta_COMID[i,]=beta_update
+    beta_init <- beta_update
+  
+    p=q/{q-1}
+    beta_update=Phit(c,p)
+    beta_COMID[i,]=beta_update
+    beta_init <- beta_update
+    theta_init = theta_update
+    
+  }
+  
+  #save final result
+  return(beta_COMID) 
+}
+
+
+
+```
+
+```{r}
+RLS_beta_s = recursive_LS(x_reg_s,y_reg_s)
+
+
+OGD_beta_s=COMID_reg(x_reg_s,y_reg_s,0.8,q=2,lambda=0)
+AdaGrad_beta_s=AdaGrad_reg(x_reg_s,y_reg_s,0.8)
+OMD_beta_s=COMID_reg(x_reg_s,y_reg_s,50,q=1,lambda=0)
+```
+
+```{r}
+coefficients=seq(1,p,1)
+par(mfrow=c(2,2))
+
+plot(coefficients,beta,"h",col="grey",main = "RLS")
+lines(coefficients,RLS_beta_s,"h",col="blue")
+
+
+plot(coefficients,beta,"h",col="grey",main = "OGD")
+lines(coefficients,OGD_beta_s[1000,],"h",col="blue")
+
+
+plot(coefficients,beta,"h",col="grey",main = "AdaGrad")
+lines(coefficients,AdaGrad_beta_s[1000,],"h",col="blue")
+
+plot(coefficients,beta,"h",col="grey",main = "OMD")
+lines(coefficients,OMD_beta_s[1000,],"h",col="blue")
+```
+
+
+```{r}
+OGD_reg_beta=COMID_reg(x_reg,y_reg,5,q=2,lambda=0)
+AdaGrad_reg_beta=AdaGrad_reg(x_reg,y_reg,0.8)
+OMD_reg_beta=COMID_reg(x_reg,y_reg,100,q=1,lambda=0)
+
+
+#SGD_reg_beta=SGD_reg(x_reg,y_reg,0.3)
+
+#MSPE_SGD=rep(NA,n)
+#for (i in 1:n){
+  #MSPE_SGD[i]=mean(((y_reg-x_reg%*%SGD_reg_beta[i,])^2))
+#}
+  
+#plot(seq(1,n,1),MSPE_AdaGrad,type = "l",col="red",xlab="n",ylab="Prediction Error")
+#lines(seq(1,n,1),MSPE_SGD,type = "l",col="black")
+
+n=8000
+MSPE_OGD=rep(NA,n)
+MSPE_AdaGrad=rep(NA,n)
+
+MSPE_OMD=rep(NA,n)
+
+for (i in 1:n){
+  #MSPE_OGD[i]=mean(((y_reg-x_reg%*%OGD_reg_beta[i,])^2))
+  #MSPE_AdaGrad[i]=mean(((y_reg-x_reg%*%AdaGrad_reg_beta[i,])^2))
+  MSPE_OMD[i]=mean(((y_reg-x_reg%*%OMD_reg_beta[i,])^2))
+}
+
+plot(seq(1,n,1),MSPE_AdaGrad,type = "l",col="red",xlab="n",ylab="Prediction Error")
+lines(seq(1,n,1),MSPE_OMD,type = "l",col="green")
+#lines(seq(1,n,1),MSPE_SGD,type = "l",col="black")
+lines(seq(1,n,1),MSPE_OGD,type = "l",col="blue")
+legend("topright",legend=c("AdaGrad", "OMD","OGD"),
+       col=c("red", "green","blue"), lty=rep(1,3), cex=0.8)
+abline(v=1000,lty=2)
+```
+
+##estimate error
+```{r}
+n=8000
+est_OGD=rep(NA,n)
+est_AdaGrad=rep(NA,n)
+est_OMD=rep(NA,n)
+
+for (i in 1:n){
+  est_OGD[i]=norm(beta-OGD_reg_beta[i,],"2")
+  est_AdaGrad[i]=norm(beta-AdaGrad_reg_beta[i,],"2")
+  est_OMD[i]=norm(beta-OMD_reg_beta[i,],"2")
+ 
+}
+
+plot(seq(1,n,1),est_AdaGrad,type = "l",col="red",xlab="n",ylab="Estimation Error",ylim = c(8,96))
+lines(seq(1,n,1),est_OMD,type = "l",col="green")
+#lines(seq(1,n,1),MSPE_SGD,type = "l",col="black")
+lines(seq(1,n,1),est_OGD,type = "l",col="blue")
+legend("topright",legend=c("AdaGrad", "OMD","OGD"),
+       col=c("red", "green","blue"), lty=rep(1,3), cex=0.8)
+abline(v=1000,lty=2)
+```
+
+## step size of AdaGrad
+```{r}
+AdaGrad_reg_beta_0.1=AdaGrad_reg(x_reg,y_reg,0.1)
+AdaGrad_reg_beta_0.5=AdaGrad_reg(x_reg,y_reg,0.5)
+AdaGrad_reg_beta_1=AdaGrad_reg(x_reg,y_reg,1)
+AdaGrad_reg_beta_2=AdaGrad_reg(x_reg,y_reg,2)
+
+
+n=8000
+MSPE_AdaGrad_0.1=rep(NA,n)
+MSPE_AdaGrad_0.5=rep(NA,n)
+MSPE_AdaGrad_1=rep(NA,n)
+MSPE_AdaGrad_2=rep(NA,n)
+
+
+for (i in 1:n){
+
+  MSPE_AdaGrad_0.1[i]=mean(((y_reg-x_reg%*%AdaGrad_reg_beta_0.1[i,])^2))
+  
+   MSPE_AdaGrad_0.5[i]=mean(((y_reg-x_reg%*%AdaGrad_reg_beta_0.5[i,])^2))
+   
+    MSPE_AdaGrad_1[i]=mean(((y_reg-x_reg%*%AdaGrad_reg_beta_1[i,])^2))
+    
+     MSPE_AdaGrad_2[i]=mean(((y_reg-x_reg%*%AdaGrad_reg_beta_2[i,])^2))
+  
+}
+
+
+plot(seq(1,n,1),MSPE_AdaGrad_0.1,type = "l",col="red",xlab="n",ylab="Prediction Error",ylim=c(100,21000),main = "AdaGrad with different step size")
+lines(seq(1,n,1),MSPE_AdaGrad_0.5,type = "l",col="green")
+lines(seq(1,n,1),MSPE_AdaGrad_1,type = "l",col="orange")
+lines(seq(1,n,1),MSPE_AdaGrad_2,type = "l",col="blue")
+legend("topright",legend=c("0.1", "0.5","1","2"),
+       col=c("red", "green","orange","blue"), lty=rep(1,4), cex=0.8)
+abline(v=1000,lty=2)
+
+
+
+```
+
+
+
+
+```{r}
+#Real data set
+library(hdi)
+data(riboflavin)
+dim(riboflavin$x)
+y_riboflavin=riboflavin$y
+
+n1=  60
+n2=  11
+set.seed(6520)
+index=sample(1:71,n1)
+x_train=riboflavin$x[index,]
+y_train=y_riboflavin[index]
+x_test=riboflavin$x[-index,]
+y_test=y_riboflavin[-index]
+
+
+OGD_train_beta=SGD_reg(x_train,y_train,0.04,q=2,lambda=0)
+AdaGrad_train_beta=AdaGrad_reg(x_train,y_train,1)
+OMD_train_beta=COMID_reg(x_train,y_train,3,q=1,lambda=0)
+library(quantreg)
+RLS_train_beta=lm.fit.recursive(t(as.matrix(x_train)), as.vector(y_train), int=FALSE)
+
+
+
+train_OGD_clf=mean(((y_test-x_test%*%OGD_train_beta[n1,])^2))
+train_OMD_clf=mean(((y_test-x_test%*%OMD_train_beta[n1,])^2))
+train_AdaGrad_clf=mean(((y_test-x_test%*%AdaGrad_train_beta[n1,])^2))
+train_RLS_clf=mean(((y_test-x_test%*%RLS_train_beta[60,])^2))
+  
+
+
+
+print(c(train_OGD_clf,train_AdaGrad_clf,train_OMD_clf,train_RLS_clf))
+
+
+```
+
